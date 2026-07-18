@@ -59,45 +59,102 @@ pip install -e ".[dev]"
 
 Các optional dependency không được import khi không dùng: `faiss`, `transformers`, `PaddleOCR`, `faster-whisper`, `google-genai`, `openpyxl`.
 
-Không commit khóa. Trong Colab đặt `GOOGLE_API_KEY` từ Colab Secrets hoặc environment. `DATA_ROOT`, `ARTIFACT_ROOT`, `OUTPUT_ROOT`, `MODEL_CACHE`, `HCM_AI_PROFILE` có thể override YAML; đặt artifact/model cache vào Drive vì `/content` là ephemeral.
+### Cấu hình `.env`
 
-## Quick start trên Google Drive
+`.env.example` được lưu trên Git, còn `.env` bị ignore nên **không xuất hiện sau khi clone**. Tạo file riêng rồi sửa các đường dẫn cho đúng Drive của bạn:
 
-Mở lần lượt các notebook:
+```bash
+cp .env.example .env
+```
+
+Package và mọi CLI tự nạp `.env`. Thứ tự ưu tiên là: tham số CLI → biến runtime/Colab Secrets → `.env` → YAML mặc định. Vì vậy file không ghi đè biến đã được Colab cấp. Nếu giữ file riêng trên Drive, đặt `HCM_AI_ENV_FILE=/content/drive/MyDrive/.../.env` **trước lần đầu import `hcm_ai`**.
+
+Không commit khóa. Khuyến nghị đặt `GOOGLE_API_KEY` bằng Colab Secrets; `.env` chỉ là fallback. `DATA_PATH` là thư mục dataset đầu vào, còn `DATA_ROOT` là thư mục làm việc của project. Các biến khác gồm `ARTIFACT_ROOT`, `OUTPUT_ROOT`, `MODEL_CACHE`, `AIC2025_ROOT` (alias cũ) và `HCM_AI_PROFILE`. Đặt artifact/model cache vào Drive vì `/content` là ephemeral.
+
+`DATA_PATH` phải là đường dẫn đã mount như `/content/drive/MyDrive/AIC2025`, không phải URL Google Drive. Với folder được chia sẻ, thêm shortcut vào My Drive trước khi chạy.
+
+## Chạy trực tiếp từng file trong cell Colab
+
+Không bắt buộc mở các file `.ipynb`. Trong Colab, cú pháp đúng là `!python scripts/<tên_file>.py`; không phải `python--`.
+
+Sau khi clone, chuyển vào repository, tạo `.env`, chỉnh `DATA_PATH` trong Files panel rồi cài package:
+
+```python
+%cd /content/HCM-AI-Challenge-2026
+!cp -n .env.example .env
+!python -m pip install -q -e ".[dev,retrieval,models,ocr,asr,gemini]"
+```
+
+Nếu dùng Gemini, đưa Colab Secret vào environment của runtime trước khi gọi file Python (không in giá trị):
+
+```python
+from google.colab import userdata
+import os
+gemini_key = userdata.get("GOOGLE_API_KEY")
+if gemini_key:
+    os.environ["GOOGLE_API_KEY"] = gemini_key
+```
+
+Kiểm tra `.env` mà không in khóa API:
+
+```python
+!python scripts/check_environment.py
+```
+
+Build baseline từ `DATA_PATH`. Lệnh tự ưu tiên frame metadata có timestamp chính xác, sau đó `keyframes/` rồi mới tới `videos/`, và ghi trạng thái vào `ARTIFACT_ROOT/pipeline_state.json`:
+
+```python
+!python scripts/build_pipeline.py
+```
+
+Nếu cấu trúc dataset không chuẩn, truyền nguồn rõ ràng:
+
+```python
+!python scripts/build_pipeline.py --keyframes-root /content/drive/MyDrive/AIC2025/keyframes
+```
+
+OCR/ASR là tùy chọn:
+
+```python
+!python scripts/build_pipeline.py --run-ocr
+# Hoặc thêm: --ocr-records /duong/dan/ocr.jsonl --asr-records /duong/dan/asr.jsonl
+```
+
+Tìm kiếm sẽ tự đọc `pipeline_state.json` và tự xuất dưới `OUTPUT_ROOT`:
+
+```python
+!python scripts/run_retrieval.py \
+  --query-id demo_kis --query "người đứng cạnh biển hiệu" --task KIS
+
+!python scripts/run_retrieval.py \
+  --query-id demo_trake --query $'E1: xe xuất hiện\nE2: người vẫy tay' --task TRAKE
+
+!python scripts/run_retrieval.py \
+  --query-id demo_qa --query "Biển hiệu ghi gì?" --task QA
+```
+
+Mỗi lệnh search in trường `jsonl` chứa đường dẫn kết quả. Ví dụ với `.env.example`, kiểm tra KIS bằng:
+
+```python
+!python scripts/validate_submission.py \
+  --input /content/drive/MyDrive/HCM-AI-Challenge-2026/outputs/demo_kis_kis.jsonl \
+  --task KIS
+```
+
+Không dùng `$DATA_PATH` hoặc `$OUTPUT_ROOT` trong lệnh shell nếu chúng chỉ nằm trong `.env`: shell mở rộng biến trước khi Python nạp dotenv. Các script trên tự đọc chúng bên trong process Python.
+
+## Notebook tùy chọn trên Google Drive
+
+Nếu thích giao diện notebook, có thể mở lần lượt:
 
 1. `notebooks/00_colab_setup.ipynb` — mount Drive, set environment/cache và cài dependencies.
 2. `notebooks/01_ingest_index.ipynb` — ưu tiên keyframe/metadata AIC2025 có sẵn, tạo manifest rồi index theo batch/resume.
 3. `notebooks/02_search_evaluate.ipynb` — KIS, TRAKE, QA, canonical export và validator.
 
-Ví dụ CLI tương đương:
-
-```bash
-# 1. Keyframe supplied trước; raw video chỉ là fallback FFmpeg.
-python scripts/preprocess_videos.py \
-  --keyframes-root "$DATA_ROOT/AIC2025/keyframes" \
-  --artifact-root "$ARTIFACT_ROOT"
-
-# 2. Dùng đường dẫn JSONL manifest được in từ bước 1.
-python scripts/build_visual_index.py \
-  --manifest /content/frames.jsonl --profile balanced_gpu \
-  --artifact-root "$ARTIFACT_ROOT"
-
-# 3. OCR/ASR record có sẵn hoặc yêu cầu --run-ocr / --asr-audio-root.
-python scripts/build_text_index.py \
-  --manifest /content/frames.jsonl --run-ocr \
-  --artifact-root "$ARTIFACT_ROOT"
-
-# 4. Search/export. Có thể lặp --visual-index cho dual retrieval.
-python scripts/run_retrieval.py \
-  --query "người đứng cạnh biển hiệu" --task KIS \
-  --visual-index siglip=<visual-fingerprint> \
-  --ocr-index <ocr-fingerprint> \
-  --artifact-root "$ARTIFACT_ROOT" --output "$OUTPUT_ROOT/kis.jsonl"
-
-python scripts/validate_submission.py --input "$OUTPUT_ROOT/kis.jsonl"
-```
-
-Mỗi CLI in một JSON status để notebook lấy fingerprint/artifact path. `--force` tạo fingerprint mới, không xóa artifact Drive đã hoàn tất.
+Các stage thấp hơn (`preprocess_videos.py`, `build_visual_index.py`,
+`build_text_index.py`) vẫn có thể chạy riêng để debug. `build_pipeline.py` chỉ
+điều phối các file này và lưu state; `--force` tạo build mới nhưng không xóa
+artifact Drive đã hoàn tất.
 
 ## Public Python contract
 
@@ -153,4 +210,4 @@ Unit tests không cần GPU, Qdrant, Elasticsearch hay API key. Các test model/
 - Không gửi toàn bộ keyframe sang Gemini. Gemini chỉ là optional query plan/grounded QA và selective OCR refinement, có cache + bounded retry/rate limit.
 - Giữ Vietnamese query cho OCR/ASR; visual branch dùng bản dịch/variant bảo thủ khi available.
 - Mọi đường dẫn/key/collection runtime đều thuộc YAML/environment, không hardcode máy cá nhân.
-- Đừng ghi đè `.env.example`, `.gitignore` hoặc `AGENTS.md` local.
+- Không commit `.env`, khóa API, dữ liệu hoặc artifact sinh ra; chỉ `.env.example` được version control.

@@ -32,7 +32,11 @@ from hcm_ai.runtime import detect_capabilities
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True, help="FrameRecord JSONL manifest")
-    parser.add_argument("--profile", default="auto", choices=["auto", "cpu", "balanced_gpu", "paper_gpu"])
+    parser.add_argument(
+        "--profile",
+        default=None,
+        choices=["auto", "cpu", "balanced_gpu", "paper_gpu"],
+    )
     parser.add_argument(
         "--encoder",
         action="append",

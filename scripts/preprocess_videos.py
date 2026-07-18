@@ -12,11 +12,28 @@ import argparse
 from pathlib import Path
 from typing import Sequence
 
-from _cli_common import default_path_from_env, emit_json, source_signature
+if __package__:
+    from ._cli_common import (
+        dataset_path_from_env,
+        default_path_from_env,
+        emit_json,
+        source_signature,
+    )
+else:
+    from _cli_common import (
+        dataset_path_from_env,
+        default_path_from_env,
+        emit_json,
+        source_signature,
+    )
 
 from hcm_ai.artifacts import ArtifactStore, fingerprint_inputs
 from hcm_ai.contracts import FrameRecord
-from hcm_ai.ingestion import build_keyframe_manifest, frame_records_from_keyframes
+from hcm_ai.ingestion import (
+    build_keyframe_manifest,
+    discover_aic2025_source,
+    frame_records_from_keyframes,
+)
 from hcm_ai.ingestion.aic2025 import load_frame_records
 from hcm_ai.preprocessing import extract_interval_keyframes
 
@@ -26,10 +43,24 @@ _VIDEO_SUFFIXES = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v"}
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    source = parser.add_mutually_exclusive_group(required=True)
+    source = parser.add_mutually_exclusive_group(required=False)
     source.add_argument("--keyframes-root", type=Path, help="Existing AIC-style keyframe tree")
-    source.add_argument("--frame-metadata", type=Path, help="Existing JSON or JSONL FrameRecord metadata")
-    source.add_argument("--videos-root", type=Path, help="Raw videos; use only when keyframes are unavailable")
+    source.add_argument(
+        "--frame-metadata",
+        type=Path,
+        help="Existing JSON or JSONL FrameRecord metadata",
+    )
+    source.add_argument(
+        "--videos-root",
+        type=Path,
+        help="Raw videos; use only when keyframes are unavailable",
+    )
+    parser.add_argument(
+        "--data-path",
+        type=Path,
+        default=Path(dataset_path_from_env()),
+        help="Dataset root used for source auto-discovery (defaults to DATA_PATH/AIC2025_ROOT)",
+    )
     parser.add_argument(
         "--generated-keyframes-root",
         type=Path,
@@ -43,9 +74,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Explicitly allow FFmpeg to replace generated fallback keyframes",
     )
-    parser.add_argument("--artifact-root", type=Path, default=Path(default_path_from_env("ARTIFACT_ROOT", "artifacts")))
+    parser.add_argument(
+        "--artifact-root",
+        type=Path,
+        default=Path(default_path_from_env("ARTIFACT_ROOT", "artifacts")),
+    )
     parser.add_argument("--artifact-name", default="frames", help="Single artifact JSONL basename")
-    parser.add_argument("--force", action="store_true", help="Replace an existing completed manifest artifact")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace an existing completed manifest artifact",
+    )
     return parser
 
 
@@ -105,7 +144,21 @@ def _load_frames(args: argparse.Namespace) -> tuple[list[FrameRecord], str, list
     return frames, "ffmpeg_fixed_interval", videos, str(generated_root)
 
 
+def _resolve_source(args: argparse.Namespace) -> None:
+    if any((args.frame_metadata, args.keyframes_root, args.videos_root)):
+        return
+    source_type, source_path = discover_aic2025_source(args.data_path)
+    if source_type == "frame_metadata":
+        args.frame_metadata = source_path
+    elif source_type == "keyframes":
+        args.keyframes_root = source_path
+    else:
+        args.videos_root = source_path
+
+
 def _validate_unique_frames(frames: Sequence[FrameRecord]) -> None:
+    if not frames:
+        raise ValueError("frame source produced no supported images or records")
     frame_ids = [frame.frame_id for frame in frames]
     if len(frame_ids) != len(set(frame_ids)):
         raise ValueError("frame manifest contains duplicate frame_id values")
@@ -118,6 +171,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.interval_seconds <= 0:
         raise ValueError("--interval-seconds must be positive")
 
+    _resolve_source(args)
     frames, source_type, source_paths, source_label = _load_frames(args)
     _validate_unique_frames(frames)
     artifact_fingerprint = fingerprint_inputs(
@@ -150,6 +204,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "artifact": reference,
             "frame_count": len(frames),
             "resumed": resumed and not args.force,
+            "source": source_label,
             "source_type": source_type,
         }
     )
@@ -158,4 +213,3 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover - exercised by notebook/CLI use
     raise SystemExit(main())
-

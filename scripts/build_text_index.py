@@ -41,7 +41,11 @@ _AUDIO_SUFFIXES = {".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg"}
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True, help="FrameRecord JSONL manifest")
-    parser.add_argument("--profile", default="auto", choices=["auto", "cpu", "balanced_gpu", "paper_gpu"])
+    parser.add_argument(
+        "--profile",
+        default=None,
+        choices=["auto", "cpu", "balanced_gpu", "paper_gpu"],
+    )
     parser.add_argument(
         "--modality",
         action="append",
@@ -336,4 +340,3 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover - exercised by notebook/CLI use
     raise SystemExit(main())
-

@@ -31,6 +31,17 @@ def ensure_package_importable() -> None:
 ensure_package_importable()
 
 
+def ensure_environment_loaded() -> None:
+    """Load the checkout's ``.env`` before CLI defaults inspect ``os.environ``."""
+
+    from hcm_ai.environment import load_environment
+
+    load_environment()
+
+
+ensure_environment_loaded()
+
+
 T = TypeVar("T")
 
 
@@ -111,7 +122,13 @@ def batches(values: Sequence[T], batch_size: int) -> Iterator[Sequence[T]]:
 def default_path_from_env(name: str, fallback: str) -> str:
     """Use a Drive-friendly environment override when the caller supplied one."""
 
-    return os.environ.get(name, fallback)
+    return os.environ.get(name) or fallback
+
+
+def dataset_path_from_env(fallback: str = "data") -> str:
+    """Return the benchmark input root without relying on shell expansion."""
+
+    return os.environ.get("DATA_PATH") or os.environ.get("AIC2025_ROOT") or fallback
 
 
 def configure_model_cache(path: str | Path | None) -> None:
@@ -125,13 +142,14 @@ def configure_model_cache(path: str | Path | None) -> None:
     os.environ.setdefault("TRANSFORMERS_CACHE", str(cache / "huggingface" / "hub"))
 
 
-def resolve_runtime_settings(requested_profile: str) -> tuple[str, Any]:
+def resolve_runtime_settings(requested_profile: str | None = None) -> tuple[str, Any]:
     """Resolve a hardware-safe profile before loading its YAML settings."""
 
     from hcm_ai.config import load_settings
     from hcm_ai.runtime import resolve_profile
 
-    resolved = resolve_profile(requested_profile)
+    requested = requested_profile or os.environ.get("HCM_AI_PROFILE") or "auto"
+    resolved = resolve_profile(requested)
     return resolved, load_settings(profile=resolved)
 
 

@@ -11,12 +11,15 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .environment import load_environment
+
 
 class _ConfigModel(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
 
 
 class PathSettings(_ConfigModel):
+    data_path: str = "data"
     data_root: str = "data"
     artifact_root: str = "artifacts"
     output_root: str = "outputs"
@@ -148,7 +151,8 @@ def deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str
 def _substitute_environment(value: Any, environ: Mapping[str, str]) -> Any:
     if isinstance(value, str):
         return _ENV_PATTERN.sub(
-            lambda match: environ.get(match.group(1), match.group(2) or ""),
+            # Match shell ``${NAME:-fallback}``: an empty value is also unset.
+            lambda match: environ.get(match.group(1)) or match.group(2) or "",
             value,
         )
     if isinstance(value, Mapping):
@@ -173,7 +177,15 @@ def resolve_profile(
 ) -> dict[str, Any]:
     """Merge versioned config layers and apply one named hardware profile."""
 
-    environment = os.environ if environ is None else environ
+    if environ is None:
+        # This is intentionally idempotent and preserves values already present
+        # in the process environment.
+        load_environment()
+        environment: Mapping[str, str] = os.environ
+    else:
+        # An explicitly supplied mapping is a deterministic test/API boundary;
+        # do not mix it with process or dotenv state.
+        environment = environ
     directory = default_config_dir() if config_dir is None else Path(config_dir)
     default_data, models_data, indexes_data = _read_config_layers(directory)
 
@@ -202,12 +214,17 @@ def resolve_profile(
     # Explicit environment variables are ergonomic in Colab and intentionally
     # take precedence over versioned defaults and profile files.
     path_overrides = {
+        "DATA_PATH": "data_path",
         "DATA_ROOT": "data_root",
         "ARTIFACT_ROOT": "artifact_root",
         "OUTPUT_ROOT": "output_root",
         "MODEL_CACHE": "model_cache",
     }
     paths = dict(resolved.get("paths", {}))
+    # AIC2025_ROOT is retained as a benchmark-specific compatibility alias;
+    # the generic DATA_PATH is the preferred input dataset location.
+    if environment.get("AIC2025_ROOT") and not environment.get("DATA_PATH"):
+        paths["data_path"] = environment["AIC2025_ROOT"]
     for env_name, setting_name in path_overrides.items():
         if environment.get(env_name):
             paths[setting_name] = environment[env_name]

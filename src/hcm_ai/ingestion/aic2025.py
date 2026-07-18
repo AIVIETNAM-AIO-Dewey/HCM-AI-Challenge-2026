@@ -22,12 +22,68 @@ class OptionalDependencyError(RuntimeError):
 
 
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+_VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v"}
 _EXCEL_EXTENSIONS = {".xlsx", ".xlsm"}
 _TASK_PATTERNS: tuple[tuple[TaskType, re.Pattern[str]], ...] = (
     (TaskType.TRAKE, re.compile(r"(?<![A-Z0-9])TRAKE(?![A-Z0-9])", re.IGNORECASE)),
     (TaskType.QA, re.compile(r"(?<![A-Z0-9])(?:VQA|QA)(?![A-Z0-9])", re.IGNORECASE)),
     (TaskType.KIS, re.compile(r"(?<![A-Z0-9])KIS(?![A-Z0-9])", re.IGNORECASE)),
 )
+
+
+def discover_aic2025_source(root: str | Path) -> tuple[str, Path]:
+    """Find a conventional supplied source under one mounted dataset root.
+
+    Discovery is intentionally conservative and deterministic. Authoritative
+    frame metadata wins, followed by non-empty keyframes and raw videos.
+    Non-standard layouts remain available through explicit CLI flags.
+    """
+
+    dataset_root = Path(root)
+    if not dataset_root.is_dir():
+        raise NotADirectoryError(dataset_root)
+
+    metadata_candidates = (
+        dataset_root / "frames.jsonl",
+        dataset_root / "frames.json",
+        dataset_root / "metadata" / "frames.jsonl",
+        dataset_root / "metadata" / "frames.json",
+        dataset_root / "metadata" / "frame_records.jsonl",
+    )
+    for candidate in metadata_candidates:
+        if candidate.is_file() and candidate.stat().st_size > 0:
+            return "frame_metadata", candidate
+
+    lowered_name = dataset_root.name.casefold()
+    keyframe_candidates = (
+        *((dataset_root,) if lowered_name in {"keyframe", "keyframes"} else ()),
+        *(dataset_root / name for name in ("keyframes", "Keyframes", "keyframe", "Keyframe")),
+    )
+    for candidate in keyframe_candidates:
+        if candidate.is_dir() and any(
+            path.is_file() and path.suffix.lower() in _IMAGE_EXTENSIONS
+            for path in candidate.rglob("*")
+        ):
+            return "keyframes", candidate
+
+    video_candidates = (
+        *((dataset_root,) if lowered_name in {"video", "videos"} else ()),
+        *(dataset_root / name for name in ("videos", "Videos", "video", "Video")),
+    )
+    for candidate in video_candidates:
+        if candidate.is_dir() and any(
+            path.is_file() and path.suffix.lower() in _VIDEO_EXTENSIONS
+            for path in candidate.rglob("*")
+        ):
+            return "videos", candidate
+
+    expected = ", ".join(
+        str(path) for path in (*keyframe_candidates, *metadata_candidates, *video_candidates)
+    )
+    raise FileNotFoundError(
+        f"could not discover keyframes, frame metadata, or videos under {dataset_root}; "
+        f"checked: {expected}"
+    )
 
 
 def infer_task_type(value: str | Path | Iterable[str | Path], default: TaskType | None = None) -> TaskType:
@@ -346,6 +402,7 @@ __all__ = [
     "AIC2025Adapter",
     "OptionalDependencyError",
     "build_keyframe_manifest",
+    "discover_aic2025_source",
     "infer_task_type",
     "load_aic2025_queries",
     "load_frame_records",

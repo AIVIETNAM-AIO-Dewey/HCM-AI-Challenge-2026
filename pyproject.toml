@@ -12,6 +12,7 @@ license = { text = "MIT" }
 authors = [{ name = "HCM AI Challenge team" }]
 dependencies = [
     "pydantic>=2.7,<3.0",
+    "python-dotenv>=1.0,<2.0",
     "PyYAML>=6.0",
 ]
 

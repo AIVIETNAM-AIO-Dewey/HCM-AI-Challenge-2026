@@ -15,6 +15,7 @@ from hcm_ai.contracts import (
 )
 from hcm_ai.ingestion.aic2025 import (
     build_keyframe_manifest,
+    discover_aic2025_source,
     parse_excel_queries,
     parse_txt_query,
 )
@@ -151,3 +152,31 @@ def test_excel_query_adapter_reads_query_name_description_and_trans(tmp_path) ->
     assert records[0].task is TaskType.QA
     assert records[0].text == "Ai đang nói?"
     assert records[0].translated_text == "Who is speaking?"
+
+
+def test_aic_source_discovery_prefers_authoritative_metadata(tmp_path) -> None:
+    keyframes = tmp_path / "keyframes"
+    keyframes.mkdir()
+    (keyframes / "000001.jpg").write_bytes(b"image")
+    metadata = tmp_path / "frames.jsonl"
+    metadata.write_text(
+        '{"frame_id":"V1_F1","video_id":"V1","timestamp":0,"image_path":"x.jpg"}\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "videos").mkdir()
+
+    source_type, source_path = discover_aic2025_source(tmp_path)
+
+    assert source_type == "frame_metadata"
+    assert source_path == metadata
+
+
+def test_aic_source_discovery_skips_empty_keyframes(tmp_path) -> None:
+    (tmp_path / "keyframes").mkdir()
+    metadata = tmp_path / "frames.jsonl"
+    metadata.write_text(
+        '{"frame_id":"V1_F1","video_id":"V1","timestamp":0,"image_path":"x.jpg"}\n',
+        encoding="utf-8",
+    )
+
+    assert discover_aic2025_source(tmp_path) == ("frame_metadata", metadata)

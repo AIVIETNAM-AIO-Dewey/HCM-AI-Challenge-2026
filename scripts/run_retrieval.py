@@ -10,11 +10,25 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from _cli_common import configure_model_cache, default_path_from_env, emit_json, resolve_runtime_settings
+if __package__:
+    from ._cli_common import (
+        configure_model_cache,
+        default_path_from_env,
+        emit_json,
+        resolve_runtime_settings,
+    )
+else:
+    from _cli_common import (
+        configure_model_cache,
+        default_path_from_env,
+        emit_json,
+        resolve_runtime_settings,
+    )
 
 from hcm_ai.artifacts import ArtifactStore
 from hcm_ai.contracts import QueryRecord, TaskType
@@ -36,8 +50,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--query-id", help="Stable ID for an ad-hoc query")
     parser.add_argument("--task", default="auto", choices=["auto", "KIS", "TRAKE", "QA"])
     parser.add_argument("--top-k", type=int, default=10)
-    parser.add_argument("--profile", default="auto", choices=["auto", "cpu", "balanced_gpu", "paper_gpu"])
-    parser.add_argument("--artifact-root", type=Path, default=Path(default_path_from_env("ARTIFACT_ROOT", "artifacts")))
+    parser.add_argument(
+        "--profile",
+        default=None,
+        choices=["auto", "cpu", "balanced_gpu", "paper_gpu"],
+    )
+    parser.add_argument(
+        "--artifact-root",
+        type=Path,
+        help="Artifact root; defaults to pipeline state, then ARTIFACT_ROOT",
+    )
+    parser.add_argument(
+        "--state",
+        type=Path,
+        help=(
+            "State from build_pipeline.py "
+            "(default: ARTIFACT_ROOT/pipeline_state.json when present)"
+        ),
+    )
     parser.add_argument(
         "--visual-index",
         action="append",
@@ -53,7 +83,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--answerer", choices=["offline", "gemini"], default="offline")
     parser.add_argument("--reranker", choices=["none", "auto", "blip"], default="auto")
     parser.add_argument("--gemini-cache", type=Path, help="Drive path for bounded Gemini cache")
-    parser.add_argument("--output", type=Path, required=True, help="Canonical result JSONL path")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Canonical JSONL path (default: OUTPUT_ROOT/<query-id>_<task>.jsonl)",
+    )
     parser.add_argument("--csv", type=Path, help="Canonical CSV path (defaults beside --output)")
     parser.add_argument("--trace", type=Path, help="Query-plan / branch-status JSON path")
     return parser
@@ -206,40 +240,114 @@ def _write_trace(path: Path, payload: Mapping[str, Any]) -> Path:
     return path
 
 
+def _load_pipeline_state(path: Path, *, required: bool) -> dict[str, Any]:
+    if not path.is_file():
+        if required:
+            raise FileNotFoundError(path)
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"pipeline state must be a JSON object: {path}")
+    if payload.get("schema_version", 1) != 1:
+        raise ValueError(f"unsupported pipeline state schema in {path}")
+    return payload
+
+
+def _visual_indexes_from_state(state: Mapping[str, Any]) -> list[str]:
+    indexes = state.get("visual_indexes", {})
+    if not isinstance(indexes, Mapping):
+        raise ValueError("pipeline state visual_indexes must be a mapping")
+    specifications: list[str] = []
+    for name, fingerprint in indexes.items():
+        if not isinstance(name, str) or not isinstance(fingerprint, str):
+            raise ValueError("pipeline state visual index names/fingerprints must be strings")
+        if name and fingerprint:
+            specifications.append(f"{name}={fingerprint}")
+    return specifications
+
+
+def _state_fingerprint(state: Mapping[str, Any], name: str) -> str | None:
+    value = state.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"pipeline state {name} must be a non-empty string or null")
+    return value
+
+
+def _default_output_path(query: QueryRecord) -> Path:
+    safe_query_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", query.query_id).strip("._") or "query"
+    output_root = Path(default_path_from_env("OUTPUT_ROOT", "outputs"))
+    return output_root / f"{safe_query_id}_{query.task.value.casefold()}.jsonl"
+
+
+def _resolve_artifact_root(
+    explicit: Path | None,
+    state: Mapping[str, Any],
+    fallback: Path,
+) -> Path:
+    if explicit is not None:
+        return explicit
+    state_root = state.get("artifact_root")
+    if state_root is None:
+        return fallback
+    if not isinstance(state_root, str) or not state_root:
+        raise ValueError("pipeline state artifact_root must be a non-empty string")
+    return Path(state_root)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.top_k <= 0:
         raise ValueError("--top-k must be positive")
-    profile, settings = resolve_runtime_settings(args.profile)
+    environment_artifact_root = Path(default_path_from_env("ARTIFACT_ROOT", "artifacts"))
+    state_lookup_root = args.artifact_root or environment_artifact_root
+    state_path = args.state or state_lookup_root / "pipeline_state.json"
+    state = _load_pipeline_state(state_path, required=args.state is not None)
+    args.artifact_root = _resolve_artifact_root(
+        args.artifact_root,
+        state,
+        environment_artifact_root,
+    )
+    state_profile = state.get("profile") if isinstance(state.get("profile"), str) else None
+    profile, settings = resolve_runtime_settings(args.profile or state_profile)
     configure_model_cache(settings.paths.model_cache)
     artifact = ArtifactStore(args.artifact_root)
     device = args.device or ("cuda" if profile != "cpu" else None)
+    visual_specifications = args.visual_index or _visual_indexes_from_state(state)
+    ocr_fingerprint = args.ocr_index or _state_fingerprint(state, "ocr_index")
+    asr_fingerprint = args.asr_index or _state_fingerprint(state, "asr_index")
+    if not any((visual_specifications, ocr_fingerprint, asr_fingerprint)):
+        raise ValueError(
+            "no retrieval indexes configured; run scripts/build_pipeline.py "
+            "or pass index fingerprints"
+        )
     stores, providers = _load_visual_branches(
         artifact,
-        args.visual_index,
+        visual_specifications,
         requested_provider=args.visual_provider,
         device=device,
     )
     ocr_store = (
         load_text_store(
             artifact,
-            args.ocr_index,
+            ocr_fingerprint,
             modality="ocr",
             k1=settings.indexes.ocr.k1,
             b=settings.indexes.ocr.b,
         )
-        if args.ocr_index
+        if ocr_fingerprint
         else None
     )
     asr_store = (
         load_text_store(
             artifact,
-            args.asr_index,
+            asr_fingerprint,
             modality="asr",
             k1=settings.indexes.asr.k1,
             b=settings.indexes.asr.b,
         )
-        if args.asr_index
+        if asr_fingerprint
         else None
     )
     cache_dir = args.gemini_cache or (args.artifact_root / "gemini_cache")
@@ -254,6 +362,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         settings=settings,
     )
     query = _load_query(args)
+    output_path = args.output or _default_output_path(query)
     if query.task == TaskType.KIS:
         records: list[Any] = service.search_moments(query, top_k=args.top_k)
         for record in records:
@@ -266,9 +375,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         records = [service.answer_question(query, evidence_top_k=args.top_k)]
         validate_answer(records[0])
 
-    jsonl_path = write_jsonl(args.output, records)
-    csv_path = write_csv(args.csv or args.output.with_suffix(".csv"), records)
-    trace_path = _write_trace(args.trace or args.output.with_suffix(args.output.suffix + ".trace.json"), _trace_payload(service))
+    jsonl_path = write_jsonl(output_path, records)
+    csv_path = write_csv(args.csv or output_path.with_suffix(".csv"), records)
+    trace_path = _write_trace(
+        args.trace or output_path.with_suffix(output_path.suffix + ".trace.json"),
+        _trace_payload(service),
+    )
     emit_json(
         {
             "task": query.task.value,
@@ -277,6 +389,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "jsonl": jsonl_path,
             "csv": csv_path,
             "trace": trace_path,
+            "state": state_path if state else None,
             "branch_errors": _trace_payload(service).get("branch_errors", []),
         }
     )

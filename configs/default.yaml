@@ -3,6 +3,7 @@
 profile: balanced_gpu
 
 paths:
+  data_path: ${DATA_PATH:-data}
   data_root: ${DATA_ROOT:-data}
   artifact_root: ${ARTIFACT_ROOT:-artifacts}
   output_root: ${OUTPUT_ROOT:-outputs}

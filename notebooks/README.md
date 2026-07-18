@@ -1,6 +1,9 @@
 # Google Colab workflow
 
-Run the notebooks in order:
+The notebooks are optional. For plain Colab cells, use
+`!python scripts/check_environment.py`, `!python scripts/build_pipeline.py`,
+and `!python scripts/run_retrieval.py ...` as documented in the repository
+README. If using notebooks, run them in order:
 
 1. `00_colab_setup.ipynb` mounts Drive, installs the editable package, and puts
    all data, model caches, artifacts, and outputs on Drive.
@@ -9,14 +12,19 @@ Run the notebooks in order:
 3. `02_search_evaluate.ipynb` runs KIS, TRAKE, and grounded QA examples,
    exports canonical JSONL/CSV, and validates them.
 
-Set `AIC2025_ROOT` in the ingestion notebook to the folder containing the
-mounted AIC2025 benchmark. The expected keyframe location is shown as an
+Set `DATA_PATH` to the folder containing the mounted AIC2025 benchmark
+(`AIC2025_ROOT` remains a legacy fallback). The expected keyframe location is an
 editable variable rather than a hard-coded Drive path. Re-running an unchanged
 index command returns `reused: true` and reloads vectors/corpora from Drive
 without encoding images again.
 
-Gemini is optional. Add `GOOGLE_API_KEY` in Colab Secrets (not in a notebook,
-`.env`, or Drive state file), then change the planner/answerer switches in the
+The setup notebook loads the repository `.env` automatically. Because Git
+ignores that file, create it from `.env.example` after cloning, or set
+`HCM_AI_ENV_FILE` before the first `hcm_ai` import when the private file lives
+on Drive. Existing Colab/runtime variables take precedence over dotenv values.
+
+Gemini is optional. Prefer adding `GOOGLE_API_KEY` in Colab Secrets instead of
+a notebook or dotenv file, then change the planner/answerer switches in the
 search notebook. With no key, the heuristic planner stays local and QA returns
 `answer=null` with retrieved evidence instead of guessing.
 
