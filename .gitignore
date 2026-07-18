@@ -1,0 +1,47 @@
+# Local Codex guidance
+AGENTS.md
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python tooling
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Local IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Dataset, models, and generated pipeline artifacts
+data/raw/
+data/interim/
+data/processed/
+data/metadata/
+models/
+artifacts/
+outputs/
+submissions/
+*.faiss
+*.index
+*.parquet
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# Service storage and logs
+qdrant_storage/
+elasticsearch_data/
+logs/

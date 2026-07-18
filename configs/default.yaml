@@ -1,0 +1,43 @@
+# This file holds runtime-independent defaults.  Paths may be overridden with
+# environment variables, which keeps Colab/Drive paths out of source control.
+profile: balanced_gpu
+
+paths:
+  data_root: ${DATA_ROOT:-data}
+  artifact_root: ${ARTIFACT_ROOT:-artifacts}
+  output_root: ${OUTPUT_ROOT:-outputs}
+  model_cache: ${MODEL_CACHE:-models}
+
+runtime:
+  device: auto
+  seed: 2026
+  max_workers: 4
+
+retrieval:
+  visual_top_k: 100
+  text_top_k: 100
+  rerank_top_k: 32
+  query_expansion_n: 4
+  rrf_k: 60
+
+fusion:
+  normalization: min_max
+  missing_score: 0.0
+
+reranking:
+  enabled: true
+  candidate_top_k: 32
+  fused_weight: 0.7
+  reranker_weight: 0.3
+
+temporal:
+  event_top_k: 20
+  beam_width: 8
+  alpha: 0.01
+
+gemini:
+  api_key_env: GOOGLE_API_KEY
+  model: gemini-2.5-flash-lite
+  cache_enabled: true
+  max_retries: 2
+  timeout_seconds: 30

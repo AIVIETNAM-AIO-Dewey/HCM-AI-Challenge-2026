@@ -1,0 +1,41 @@
+# Model identifiers are data, not hard-coded into pipeline modules.  Profiles
+# layer their active components over the shared catalog.
+models:
+  catalog:
+    siglip:
+      model_id: google/siglip-base-patch16-224
+      modality: image_text
+    beit3:
+      model_id: microsoft/beit-3-base
+      modality: image_text
+    blip_itm:
+      model_id: Salesforce/blip-itm-base-coco
+      modality: image_text_reranker
+    blip2_itm:
+      model_id: Salesforce/blip2-opt-2.7b
+      modality: image_text_reranker
+    translation:
+      model_id: Helsinki-NLP/opus-mt-vi-en
+      modality: text
+  ocr_engine: paddleocr
+  asr_model: small
+
+profiles:
+  cpu:
+    models:
+      active_visual_encoders: [siglip]
+      reranker: null
+      ocr_engine: paddleocr
+      asr_model: small
+  balanced_gpu:
+    models:
+      active_visual_encoders: [siglip]
+      reranker: blip_itm
+      ocr_engine: paddleocr
+      asr_model: small
+  paper_gpu:
+    models:
+      active_visual_encoders: [siglip, beit3]
+      reranker: blip2_itm
+      ocr_engine: paddleocr
+      asr_model: large-v3

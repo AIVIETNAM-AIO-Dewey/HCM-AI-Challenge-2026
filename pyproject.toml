@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hcm-ai"
+version = "0.1.0"
+description = "Multimodal moment retrieval pipeline for HCM AI Challenge 2026"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "HCM AI Challenge team" }]
+dependencies = [
+    "pydantic>=2.7,<3.0",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "openpyxl>=3.1",
+]
+retrieval = [
+    "faiss-cpu>=1.8.0",
+    "numpy>=1.26",
+    "rank-bm25>=0.2.2",
+    "rapidfuzz>=3.9",
+]
+models = [
+    "Pillow>=10.0",
+    "torch>=2.2",
+    "transformers>=4.45",
+]
+gemini = ["google-genai>=1.0"]
+ocr = ["paddleocr>=2.8"]
+asr = ["faster-whisper>=1.0"]
+
+[project.urls]
+Repository = "https://github.com/"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]

@@ -1,0 +1,31 @@
+indexes:
+  visual:
+    backend: faiss
+    metric: inner_product
+    normalize_embeddings: true
+    index_type: flat
+  ocr:
+    backend: bm25
+    k1: 1.5
+    b: 0.75
+    fuzzy_rerank: true
+  asr:
+    backend: bm25
+    k1: 1.5
+    b: 0.75
+    fuzzy_rerank: true
+
+profiles:
+  cpu:
+    indexes:
+      visual:
+        index_type: flat
+  balanced_gpu:
+    indexes:
+      visual:
+        index_type: flat
+  paper_gpu:
+    indexes:
+      visual:
+        index_type: ivf_flat
+        nlist: 256
